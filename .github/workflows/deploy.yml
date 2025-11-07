@@ -1,0 +1,25 @@
+name: Dummy Deploy with Approval
+
+on:
+  push:
+    branches:
+      - main
+      - release-*
+  pull_request:
+    branches:
+      - main
+      - release-*
+
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production   # ✅ just reference the environment
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Dummy Deploy Step
+        run: |
+          echo "---- Simulated Deployment ----"
+          echo "Waiting for manual approval..."
