@@ -38,14 +38,14 @@ jobs:
       - name: SonarCloud Scan
         uses: SonarSource/sonarcloud-github-action@v2
         env:
-          SONAR_TOKEN: xxxxxxxxxxxxxxxxxxx
-          GITHUB_TOKEN: zzzzzzzzzzzzz
+          SONAR_TOKEN: 6b19110b0c1ecb591f36ff0f83a1928114723326
+          GITHUB_TOKEN: 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
 
       - name: Check Quality Gate
         uses: SonarSource/sonarcloud-quality-gate-action@v1
         timeout-minutes: 5
         env:
-          SONAR_TOKEN: xxxxxxxxxxxxxxxxxxx
+          SONAR_TOKEN: 6b19110b0c1ecb591f36ff0f83a1928114723326
 
   mock-deploy:
     name: 🚀 Mock Deployment (depends on Sonar)
