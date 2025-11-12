@@ -1,0 +1,77 @@
+name: SonarCloud Check → Mock Deploy
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  sonar-analysis:
+    name: 🔍 Run SonarCloud Analysis
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest coverage
+
+      - name: Run Tests & Coverage
+        run: |
+          coverage run -m pytest
+          coverage xml
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@v2
+        env:
+          SONAR_TOKEN: xxxxxxxxxxxxxxxxxxx
+          GITHUB_TOKEN: zzzzzzzzzzzzz
+
+      - name: Check Quality Gate
+        uses: SonarSource/sonarcloud-quality-gate-action@v1
+        timeout-minutes: 5
+        env:
+          SONAR_TOKEN: xxxxxxxxxxxxxxxxxxx
+
+  mock-deploy:
+    name: 🚀 Mock Deployment (depends on Sonar)
+    runs-on: ubuntu-latest
+    needs: sonar-analysis   # 👈 ensures deploy waits for Sonar success
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Mock Build Container
+        run: |
+          echo "🧱 Building mock Docker image..."
+          sleep 2
+          echo "✅ Build successful: ghcr.io/${{ github.repository }}/fastapi-sample:${{ github.sha }}"
+
+      - name: Mock Push to GHCR
+        run: |
+          echo "📦 Pushing mock image to GHCR..."
+          sleep 2
+          echo "✅ Mock push complete"
+
+      - name: Mock Deploy to Azure
+        run: |
+          echo "🚀 Mock deploying to Azure Container Apps..."
+          echo "Container App: fastapi-sample-app"
+          echo "Environment: env-fastapi-aca"
+          echo "Resource Group: rg-fastapi-aca"
+          echo "✅ Deployment simulated successfully"
