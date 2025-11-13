@@ -1,19 +1,60 @@
+# name: Build
+# on:
+#   push:
+#     branches:
+#       - main
+#   pull_request:
+#     types: [opened, synchronize, reopened]
+# jobs:
+#   sonarqube:
+#     name: SonarQube
+#     runs-on: ubuntu-latest
+#     steps:
+#       - uses: actions/checkout@v4
+#         with:
+#           fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
+#       - name: SonarQube Scan
+#         uses: SonarSource/sonarqube-scan-action@v6
+#         env:
+#           SONAR_TOKEN: fb81211f9bd3ac079265a6b3cc5d657603f2c6af
+
 name: Build
+
 on:
   push:
     branches:
       - main
   pull_request:
     types: [opened, synchronize, reopened]
+
 jobs:
-  sonarqube:
-    name: SonarQube
+  sonarcloud:
+    name: SonarCloud Analysis
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
-      - name: SonarQube Scan
-        uses: SonarSource/sonarqube-scan-action@v6
+          fetch-depth: 0   # required for SonarCloud
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest coverage
+
+      - name: Run Tests & Generate Coverage
+        run: |
+          coverage run -m pytest || true
+          coverage xml || true
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@v2
         env:
           SONAR_TOKEN: fb81211f9bd3ac079265a6b3cc5d657603f2c6af
+          GITHUB_TOKEN: ${{ secrets.GIT_TOKEN }}
