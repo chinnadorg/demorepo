@@ -17,8 +17,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Show Selected Tag
-
       - name: Validate Tag Exists
         run: |
           echo "Checking if tag exists..."
@@ -39,4 +37,3 @@ jobs:
             --name ${{ secrets.AZURE_APP }} \
             --resource-group ${{ secrets.AZURE_RG }} \
             --image $IMAGE
-            
