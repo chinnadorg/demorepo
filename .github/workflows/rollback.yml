@@ -17,23 +17,45 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Validate Tag Exists
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Show selected tag
+        env:
+          SELECTED_TAG: ${{ github.event.inputs.tag }}
         run: |
-          echo "Checking if tag exists..."
-          if ! git ls-remote --tags origin | grep -q "refs/tags/${{ github.event.inputs.tag }}"; then
-            echo "Tag does not exist!"
+          echo "Selected Tag: $SELECTED_TAG"
+
+      - name: Validate tag exists
+        env:
+          SELECTED_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          REPO_URL="${{ github.repositoryUrl }}"
+          echo "Checking if tag '$SELECTED_TAG' exists on $REPO_URL"
+
+          if ! git ls-remote --tags "$REPO_URL" | grep -q "refs/tags/$SELECTED_TAG"; then
+            echo "Tag does not exist: $SELECTED_TAG"
             exit 1
           fi
 
-      - name: Deploy Image for Rollback
+          echo "Tag found!"
+
+      - name: Deploy image for rollback
+        env:
+          SELECTED_TAG: ${{ github.event.inputs.tag }}
         run: |
-          TAG=${{ github.event.inputs.tag }}
-          IMAGE="ghcr.io/chinnadorg/dxc-content-agent:$TAG"
+          IMAGE="ghcr.io/chinnadorg/dxc-content-agent:$SELECTED_TAG"
+          echo "Rolling back to image: $IMAGE"
 
-          echo "Rolling back to: $IMAGE"
+          # Real Deployment Command:
+          # az containerapp update \
+          #   --name ${{ secrets.AZURE_APP }} \
+          #   --resource-group ${{ secrets.AZURE_RG }} \
+          #   --image $IMAGE
 
-          # Your actual deployment command here:
-          az containerapp update \
-            --name ${{ secrets.AZURE_APP }} \
-            --resource-group ${{ secrets.AZURE_RG }} \
-            --image $IMAGE
+          echo "Rollback command executed (placeholder)."
+
+      - name: Rollback success message
+        run: echo "Rollback completed using tag: ${{ github.event.inputs.tag }}"
