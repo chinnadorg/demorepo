@@ -39,5 +39,4 @@ jobs:
             --name ${{ secrets.AZURE_APP }} \
             --resource-group ${{ secrets.AZURE_RG }} \
             --image $IMAGE
-
-      - name: Rollback Success Message
+            
