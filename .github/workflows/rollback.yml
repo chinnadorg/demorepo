@@ -22,37 +22,36 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Show selected tag
+      - name: Validate selected tag
         env:
-          SELECTED_TAG: ${{ github.event.inputs.tag }}
+          TAG: ${{ github.event.inputs.tag }}
+          REPO: ${{ github.repository }}
         run: |
-          echo "Selected Tag: $SELECTED_TAG"
+          REPO_URL="https://github.com/$REPO.git"
 
-      - name: Validate tag exists
-        env:
-          SELECTED_TAG: ${{ github.event.inputs.tag }}
-        run: |
-          REPO_URL="${{ github.repositoryUrl }}"
-          echo "Checking if tag '$SELECTED_TAG' exists on $REPO_URL"
+          echo "Checking if tag '$TAG' exists on $REPO_URL"
 
-          if ! git ls-remote --tags "$REPO_URL" | grep -q "refs/tags/$SELECTED_TAG"; then
-            echo "Tag does not exist: $SELECTED_TAG"
+          if ! git ls-remote --tags "$REPO_URL" | grep -q "refs/tags/$TAG"; then
+            echo "Tag does not exist: $TAG"
             exit 1
           fi
 
           echo "Tag found!"
 
-      - name: Deploy image for rollback
+      - name: Deploy the rollback image
         env:
-          SELECTED_TAG: ${{ github.event.inputs.tag }}
+          TAG: ${{ github.event.inputs.tag }}
         run: |
-          IMAGE="ghcr.io/chinnadorg/dxc-content-agent:$SELECTED_TAG"
-          echo "Rolling back to image: $IMAGE"
+          IMAGE="ghcr.io/chinnadorg/dxc-content-agent:$TAG"
+          echo "Rolling back to $IMAGE"
+          echo "Rollback command would run here"
 
-          # Real Deployment Command:
-          # az containerapp update \
-          #   --name ${{ secrets.AZURE_APP }} \
-          #   --resource-group ${{ secrets.AZURE_RG }} \
-          #   --image $IMAGE
-
-          echo "Rollback command executed (placeholder)."
+      - name: Mark release as stable (Latest)
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.event.inputs.tag }}
+          release_name: "Stable - ${{ github.event.inputs.tag }}"
+          draft: false
+          prerelease: false
