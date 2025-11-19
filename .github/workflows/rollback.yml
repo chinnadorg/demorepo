@@ -56,6 +56,3 @@ jobs:
           #   --image $IMAGE
 
           echo "Rollback command executed (placeholder)."
-
-      - name: Rollback success message
-        run: echo "Rollback completed using tag: ${{ github.event.inputs.tag }}"
