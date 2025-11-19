@@ -67,6 +67,3 @@ jobs:
           release_name: ${{ env.NEXT_TAG }}
           draft: false
           prerelease: false
-
-      - name: Display Created Tag
-        run: echo "Created Release Tag: $NEXT_TAG"
