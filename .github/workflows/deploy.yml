@@ -1,25 +1,49 @@
-name: Dummy Deploy with Approval
+name: Build & Push to GHCR
 
 on:
   push:
-    branches:
-      - main
-      - release-*
-  # pull_request:
-  #   branches:
-  #     - main
-  #     - release-*
-
+    branches: [ main ]
 
 jobs:
-  deploy:
+  build-and-push:
     runs-on: ubuntu-latest
-    environment: production   # ✅ just reference the environment
+
     steps:
-      - name: Checkout code
+      # -----------------------------
+      # 1. Checkout repository
+      # -----------------------------
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Dummy Deploy Step
+      # -----------------------------
+      # 2. Log in to GHCR
+      # -----------------------------
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: Chinnadurai1203
+          password: ${{ env.GIT_TOKEN }}
+
+      # -----------------------------
+      # 3. Build Docker image
+      # -----------------------------
+      - name: Build Docker Image
         run: |
-          echo "---- Simulated Deployment ----"
-          echo "Waiting for manual approval..."
+          IMAGE_NAME=ghcr.io/${{ env.Chinnadurai1203 }}/dxc-content-agent:${{ github.sha }}
+          echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
+
+          docker build -t $IMAGE_NAME .
+
+      # -----------------------------
+      # 4. Push image to GHCR
+      # -----------------------------
+      - name: Push Docker Image
+        run: |
+          docker push $IMAGE_NAME
+
+      # -----------------------------
+      # 5. Show pushed image tag
+      # -----------------------------
+      - name: Display Image Tag
+        run: echo "Pushed Image: Hello"
