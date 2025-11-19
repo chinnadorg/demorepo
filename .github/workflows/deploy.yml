@@ -46,4 +46,4 @@ jobs:
       # 5. Show pushed image tag
       # -----------------------------
       - name: Display Image Tag
-        run: echo "Pushed Image: ${{ env.IMAGE_NAME }}"
+        echo "Pushed Image: $IMAGE_NAME"
