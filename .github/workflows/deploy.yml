@@ -20,8 +20,10 @@ jobs:
           password: ${{ secrets.GIT_TOKEN }}
 
       - name: Build Docker Image
+        env:
+          USERNAME: ${{ secrets.GIT_USERNAME }}
         run: |
-          IMAGE_NAME=ghcr.io/${{ secrets.GIT_USERNAME }}/dxc-content-agent:${{ github.sha }}
+          IMAGE_NAME=ghcr.io/$USERNAME/dxc-content-agent:${{ github.sha }}
           echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
           docker build -t $IMAGE_NAME .
 
