@@ -1,0 +1,45 @@
+name: Rollback to Release Tag
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to Rollback To (example: Release_V2)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  packages: read
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Show Selected Tag
+        run: echo "Selected Tag: ${{ github.event.inputs.tag }}"
+
+      - name: Validate Tag Exists
+        run: |
+          echo "Checking if tag exists..."
+          if ! git ls-remote --tags origin | grep -q "refs/tags/${{ github.event.inputs.tag }}"; then
+            echo "Tag does not exist!"
+            exit 1
+          fi
+
+      - name: Deploy Image for Rollback
+        run: |
+          TAG=${{ github.event.inputs.tag }}
+          IMAGE="ghcr.io/chinnadorg/dxc-content-agent:$TAG"
+
+          echo "Rolling back to: $IMAGE"
+
+          # Your actual deployment command here:
+          az containerapp update \
+            --name ${{ secrets.AZURE_APP }} \
+            --resource-group ${{ secrets.AZURE_RG }} \
+            --image $IMAGE
+
+      - name: Rollback Success Message
+        run: echo "Rollback Successful!"
