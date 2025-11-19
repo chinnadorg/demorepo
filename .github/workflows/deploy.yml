@@ -1,12 +1,12 @@
-name: Build & Push to GHCR
+name: Build, Push & Tag Release
 
 on:
   push:
     branches: [ main ]
 
 permissions:
-  contents: write   # required for pushing git tags
-  packages: write   # required for GHCR push
+  contents: write
+  packages: write
 
 jobs:
   build-and-push:
@@ -16,7 +16,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # REQUIRED to fetch tags
+          fetch-depth: 0
 
       - name: Login to GHCR
         uses: docker/login-action@v3
@@ -36,12 +36,37 @@ jobs:
       - name: Push Docker Image
         run: docker push $IMAGE_NAME
 
-      - name: Create Git Tag
-        env:
-          SHA: ${{ github.sha }}
+      - name: Create Auto-Increment Release Tag
         run: |
-          TAG="release-$SHA"
+          git fetch --tags
+
+          LAST_TAG=$(git tag -l "Release_V*" | sort -V | tail -n 1)
+
+          if [ -z "$LAST_TAG" ]; then
+            NEXT_TAG="Release_V1"
+          else
+            NUM=$(echo $LAST_TAG | sed 's/Release_V//')
+            NEXT_NUM=$((NUM + 1))
+            NEXT_TAG="Release_V$NEXT_NUM"
+          fi
+
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          git tag $TAG
-          git push origin $TAG
+
+          git tag $NEXT_TAG
+          git push origin $NEXT_TAG
+
+          echo "NEXT_TAG=$NEXT_TAG" >> $GITHUB_ENV
+
+      - name: Create GitHub Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ env.NEXT_TAG }}
+          release_name: ${{ env.NEXT_TAG }}
+          draft: false
+          prerelease: false
+
+      - name: Display Created Tag
+        run: echo "Created Release Tag: $NEXT_TAG"
