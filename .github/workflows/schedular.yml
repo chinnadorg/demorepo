@@ -19,8 +19,13 @@ on:
         options: [ start, stop ]
 
 jobs:
-  scheduler:
+
+  # -------------------------------------------------------------
+  # JOB 1: Calls the reusable workflow (scheduler-job.yml)
+  # -------------------------------------------------------------
+  run_scheduler:
     uses: ./.github/workflows/scheduler-job.yml
+    secrets: inherit
     with:
       config: |
         rules:
@@ -57,38 +62,40 @@ jobs:
       manual_environment: ${{ github.event.inputs.environment }}
       manual_action: ${{ github.event.inputs.action }}
 
-    secrets:
-      AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
-      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
+  # -------------------------------------------------------------
+  # JOB 2: Success Mail (uses outputs from run_scheduler)
+  # -------------------------------------------------------------
   success_email:
-    needs: scheduler
+    needs: run_scheduler
     if: success()
     uses: ./.github/workflows/send-mail.yml
     secrets: inherit
     with:
-      subject: "Scheduler SUCCESS - ${{ needs.scheduler.outputs.environment }} (${{ needs.scheduler.outputs.action }})"
+      subject: "Scheduler SUCCESS - ${{ needs.run_scheduler.outputs.environment }} (${{ needs.run_scheduler.outputs.action }})"
       message: |
-        <b>Environment:</b> ${{ needs.scheduler.outputs.environment }}<br/>
-        <b>Action:</b> ${{ needs.scheduler.outputs.action }}<br/>
+        <b>Environment:</b> ${{ needs.run_scheduler.outputs.environment }}<br/>
+        <b>Action:</b> ${{ needs.run_scheduler.outputs.action }}<br/>
         <b>Time:</b> ${{ github.event.schedule || 'Manual Dispatch' }}<br/><br/>
         Scheduler executed successfully.
       status: success
       from: "chinnadurai.madasamy@cxontology.com"
       to: "chinnad64@gmail.com"
 
+  # -------------------------------------------------------------
+  # JOB 3: Failure Mail
+  # -------------------------------------------------------------
   failure_email:
-    needs: scheduler
+    needs: run_scheduler
     if: failure()
     uses: ./.github/workflows/send-mail.yml
     secrets: inherit
     with:
-      subject: "Scheduler FAILURE - ${{ needs.scheduler.outputs.environment || 'unknown' }} (${{ needs.scheduler.outputs.action || 'unknown' }})"
+      subject: "Scheduler FAILURE - ${{ needs.run_scheduler.outputs.environment || 'unknown' }} (${{ needs.run_scheduler.outputs.action || 'unknown' }})"
       message: |
-        <b>Environment:</b> ${{ needs.scheduler.outputs.environment || 'unknown' }}<br/>
-        <b>Action Attempted:</b> ${{ needs.scheduler.outputs.action || 'unknown' }}<br/>
+        <b>Environment:</b> ${{ needs.run_scheduler.outputs.environment || 'unknown' }}<br/>
+        <b>Action Attempted:</b> ${{ needs.run_scheduler.outputs.action || 'unknown' }}<br/>
         <b>Error:</b><br/>
-        <span style='color:red;'>${{ needs.scheduler.outputs.error || 'No error captured' }}</span>
+        <span style='color:red;'>${{ needs.run_scheduler.outputs.error || 'No error captured' }}</span>
       status: failure
       from: "chinnadurai.madasamy@cxontology.com"
       to: "chinnad64@gmail.com"
