@@ -1,4 +1,4 @@
-name: Send Email
+name: Send Mail
 
 on:
   workflow_call:
@@ -12,71 +12,92 @@ on:
       status:
         required: true
         type: string
+        description: "success or failure"
       from:
         required: true
         type: string
       to:
         required: true
         type: string
-    secrets: inherit
+    secrets:
+      MAIL_TENANT_ID:
+        required: true
+      MAIL_CLIENT_ID:
+        required: true
+      MAIL_CLIENT_SECRET:
+        required: true
 
 jobs:
   send_mail:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Build HTML Email Body
-        id: build
+      - name: Determine Color
+        id: color
         run: |
-          STATUS="${{ inputs.status }}"
-          if [[ "$STATUS" == "success" ]]; then COLOR="green"; else COLOR="red"; fi
-
-          cat <<EOF > email.json
-          {
-            "message": {
-              "subject": "${{ inputs.subject }}",
-              "body": {
-                "contentType": "HTML",
-                "content":
-                  "<div style='font-family:Arial;font-size:14px;'>
-                    <h2 style='color:$COLOR;'>Status: ${STATUS^^}</h2>
-                    ${{ inputs.message }}
-                  </div>"
-              },
-              "toRecipients": [{
-                "emailAddress": { "address": "${{ inputs.to }}" }
-              }]
-            },
-            "saveToSentItems": "true"
-          }
-          EOF
-
-      - name: Fetch Token
-        id: token
-        run: |
-          RESPONSE=$(curl -X POST \
-              -H "Content-Type: application/x-www-form-urlencoded" \
-              -d "client_id=${{ secrets.GRAPH_CLIENT_ID }}" \
-              -d "scope=https://graph.microsoft.com/.default" \
-              -d "client_secret=${{ secrets.GRAPH_CLIENT_SECRET }}" \
-              -d "grant_type=client_credentials" \
-              https://login.microsoftonline.com/${{ secrets.GRAPH_TENANT_ID }}/oauth2/v2.0/token)
-
-          TOKEN=$(echo "$RESPONSE" | jq -r '.access_token')
-
-          if [[ "$TOKEN" == "null" || "$TOKEN" == "" ]]; then
-            echo "Token fetch failed"
-            exit 1
+          if [[ "${{ inputs.status }}" == "success" ]]; then
+            echo "color=green" >> $GITHUB_OUTPUT
+          else
+            echo "color=red" >> $GITHUB_OUTPUT
           fi
 
-          echo "token=$TOKEN" >> $GITHUB_OUTPUT
-
-      - name: Send Email
+      - name: Build HTML Email
+        id: html
         run: |
-          curl -X POST \
+          cat > email.html <<EOF
+          <html>
+          <body style="font-family: Arial, sans-serif;">
+            <div style="padding:20px;border:1px solid #dcdcdc;border-radius:8px;">
+              <h2 style="color:${{ steps.color.outputs.color }};">
+                ${{ inputs.subject }}
+              </h2>
+
+              <p style="font-size:14px;">
+                ${{ inputs.message }}
+              </p>
+
+              <hr/>
+              <p style="color:gray;font-size:12px;">
+                Automated Notification from GitHub Actions
+              </p>
+            </div>
+          </body>
+          </html>
+          EOF
+
+      - name: Get Access Token
+        id: token
+        run: |
+          AUTH=$(curl -s -X POST \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            -d "client_id=${{ secrets.MAIL_CLIENT_ID }}" \
+            -d "scope=https://graph.microsoft.com/.default" \
+            -d "client_secret=${{ secrets.MAIL_CLIENT_SECRET }}" \
+            -d "grant_type=client_credentials" \
+            "https://login.microsoftonline.com/${{ secrets.MAIL_TENANT_ID }}/oauth2/v2.0/token")
+
+          echo "token=$(echo $AUTH | jq -r '.access_token')" >> $GITHUB_OUTPUT
+
+      - name: Send HTML Email
+        run: |
+          BODY=$(sed 's/"/\\"/g' email.html | tr -d '\n')
+
+          curl -s -X POST \
             -H "Authorization: Bearer ${{ steps.token.outputs.token }}" \
             -H "Content-Type: application/json" \
-            -d @email.json \
-            https://graph.microsoft.com/v1.0/users/${{ inputs.from }}/sendMail
-
-          echo "Email sent successfully!"
+            -d "{
+              \"message\": {
+                \"subject\": \"${{ inputs.subject }}\",
+                \"body\": {
+                  \"contentType\": \"HTML\",
+                  \"content\": \"$BODY\"
+                },
+                \"toRecipients\": [
+                  {
+                    \"emailAddress\": {\"address\": \"${{ inputs.to }}\"}
+                  }
+                ]
+              },
+              \"saveToSentItems\": \"false\"
+            }" \
+            "https://graph.microsoft.com/v1.0/users/${{ inputs.from }}/sendMail"
