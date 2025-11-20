@@ -23,7 +23,7 @@ on:
         required: true
 
 jobs:
-  scheduler:
+  run_scheduler:   # <<< IMPORTANT FIX
     runs-on: ubuntu-latest
 
     outputs:
@@ -32,48 +32,66 @@ jobs:
       error: ${{ steps.capture_error.outputs.error }}
 
     steps:
+
+      - name: DEBUG — Show Incoming Inputs
+        run: |
+          echo "manual_environment='${{ inputs.manual_environment }}'"
+          echo "manual_action='${{ inputs.manual_action }}'"
+          echo "schedule='${{ github.event.schedule }}'"
+          echo "event_name='${{ github.event_name }}'"
+
       - name: Parse Config
         id: parse
         run: |
           echo "${{ inputs.config }}" > config.yml
           echo "${{ inputs.apps }}" > apps.yml
+          echo "===== CONFIG FILE ====="
+          cat config.yml
+          echo "===== APPS FILE ====="
+          cat apps.yml
 
       - name: Determine Rule (manual override or cron)
         id: decide
         run: |
-          # 1) Manual override via passed inputs (caller should pass manual_* when using workflow_dispatch)
+          echo "Step: DECIDE"
+
+          # 1) Manual override via direct workflow inputs
           if [[ "${{ inputs.manual_environment }}" != "" && "${{ inputs.manual_environment }}" != "null" ]]; then
-            echo "Detected manual override from caller inputs."
+            echo "Manual override detected (caller inputs)."
             echo "environment=${{ inputs.manual_environment }}" >> $GITHUB_OUTPUT
             echo "action=${{ inputs.manual_action }}" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          # 2) If no manual override, fallback to checking github.event.inputs (defensive)
+          # 2) Manual override via github.event.inputs (defensive)
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            # github.event.inputs may be present when caller used workflow_dispatch directly
             if [[ "${{ github.event.inputs.environment }}" != "" && "${{ github.event.inputs.environment }}" != "null" ]]; then
-              echo "Detected manual override from github.event.inputs."
+              echo "Manual override detected (github.event.inputs)."
               echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
               echo "action=${{ github.event.inputs.action }}" >> $GITHUB_OUTPUT
               exit 0
             fi
           fi
 
-          # 3) Cron branch: match current schedule string to config rules
+          # 3) Cron-based execution
           CURRENT_CRON="${{ github.event.schedule }}"
+          echo "CURRENT_CRON='$CURRENT_CRON'"
 
-          # Defensive: if CURRENT_CRON is empty -> fail with useful message
           if [[ -z "$CURRENT_CRON" ]]; then
-            echo "::warning::No schedule found in github.event.schedule (this may be a manual run without inputs)."
+            echo "::warning::No schedule found. Manual run without inputs."
             echo "::error::No matching cron rule found for empty schedule."
             exit 1
           fi
 
           MATCH=$(yq '.rules[] | select(.cron == "'$CURRENT_CRON'")' config.yml || true)
 
+          echo "MATCHED RULE:"
+          echo "$MATCH"
+
           ENV=$(echo "$MATCH" | yq '.environment' || true)
           ACT=$(echo "$MATCH" | yq '.action' || true)
+
+          echo "ENV='$ENV', ACT='$ACT'"
 
           if [[ -z "$ENV" || "$ENV" == "null" ]]; then
             echo "::error::No matching cron rule found for cron: $CURRENT_CRON"
@@ -86,13 +104,17 @@ jobs:
       - name: Map Environment
         id: map
         run: |
+          echo "Step: MAP"
           ENV="${{ steps.decide.outputs.environment }}"
+          echo "ENV='$ENV'"
 
           APP=$(yq ".${ENV}.app" apps.yml)
           RG=$(yq ".${ENV}.rg" apps.yml)
 
+          echo "APP='$APP', RG='$RG'"
+
           if [[ -z "$APP" || "$APP" == "null" ]]; then
-            echo "::error::App mapping not found for environment: $ENV"
+            echo "::error::Invalid environment mapping: $ENV"
             exit 1
           fi
 
@@ -107,13 +129,17 @@ jobs:
       - name: Execute Start/Stop
         id: exec
         run: |
-          set -e
+          echo "Step: EXECUTE"
+
           ACTION="${{ steps.decide.outputs.action }}"
           APP="${{ steps.map.outputs.app }}"
           RG="${{ steps.map.outputs.rg }}"
           SUB="${{ secrets.AZURE_SUBSCRIPTION_ID }}"
 
-          echo "Action: $ACTION, App: $APP, RG: $RG, Sub: $SUB"
+          echo "ACTION='$ACTION'"
+          echo "APP='$APP'"
+          echo "RG='$RG'"
+          echo "SUB='$SUB'"
 
           if [[ "$ACTION" == "start" ]]; then
             az rest --method post \
@@ -123,18 +149,20 @@ jobs:
               --url "https://management.azure.com/subscriptions/$SUB/resourceGroups/$RG/providers/Microsoft.App/containerApps/$APP/stop?api-version=2023-05-01"
           fi
 
-      - name: Capture Error (always produce output for parent)
+      - name: Capture Error
         id: capture_error
         if: always()
         run: |
-          # Use pre-expanded outcomes to detect where failure happened.
-          # These expressions (steps.*.outcome) are expanded by GH before run.
+          echo "Step: CAPTURE ERROR"
+
           DECIDE_OUTCOME="${{ steps.decide.outcome }}"
           EXEC_OUTCOME="${{ steps.exec.outcome }}"
 
-          # Determine env/action values (may be empty)
-          ENV="${{ steps.decide.outputs.environment || 'unknown' }}"
-          ACT="${{ steps.decide.outputs.action || 'unknown' }}"
+          ENV="${{ steps.decide.outputs.environment }}"
+          ACT="${{ steps.decide.outputs.action }}"
+
+          echo "DECIDE_OUTCOME='$DECIDE_OUTCOME'"
+          echo "EXEC_OUTCOME='$EXEC_OUTCOME'"
 
           if [[ "$DECIDE_OUTCOME" == "failure" ]]; then
             echo "error=Decision step failed (env=$ENV, action=$ACT)" >> $GITHUB_OUTPUT
@@ -146,5 +174,5 @@ jobs:
             exit 0
           fi
 
-          # success case -> empty error
           echo "error=" >> $GITHUB_OUTPUT
+          echo "No errors. Job succeeded."
