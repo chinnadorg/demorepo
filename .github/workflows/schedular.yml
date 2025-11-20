@@ -2,100 +2,180 @@ name: Unified Scheduler
 
 on:
   schedule:
-    - cron: '30 4 * * *'
-    - cron: '30 5 * * *'
-    - cron: '30 16 * * *'
-    - cron: '30 17 * * *'
+    - cron: "30 4 * * *"
+    - cron: "30 5 * * *"
+    - cron: "30 16 * * *"
+    - cron: "30 17 * * *"
 
   workflow_dispatch:
     inputs:
       environment:
         type: choice
         required: true
-        options: [ dev, staging, prod ]
+        options: [dev, staging, prod]
       action:
         type: choice
         required: true
-        options: [ start, stop ]
+        options: [start, stop]
 
 jobs:
+  scheduler:
+    runs-on: ubuntu-latest
 
-  # -------------------------------------------------------------
-  # JOB 1: Calls the reusable workflow (scheduler-job.yml)
-  # -------------------------------------------------------------
-  run_scheduler:
-    uses: ./.github/workflows/scheduler-job.yml
-    secrets: inherit
-    with:
-      config: |
-        rules:
-          - environment: dev
-            cron: "30 4 * * *"
-            action: start
-          - environment: staging
-            cron: "30 5 * * *"
-            action: start
-          - environment: prod
-            cron: "30 4 * * *"
-            action: start
-          - environment: dev
-            cron: "30 16 * * *"
-            action: stop
-          - environment: staging
-            cron: "30 17 * * *"
-            action: stop
-          - environment: prod
-            cron: "30 16 * * *"
-            action: stop
+    outputs:
+      environment: ${{ steps.decide.outputs.environment }}
+      action: ${{ steps.decide.outputs.action }}
+      error: ${{ steps.capture_error.outputs.error }}
 
-      apps: |
-        dev:
-          app: "dxc-content-agent-dev"
-          rg: "CXO-F1"
-        staging:
-          app: "dxc-content-agent-staging"
-          rg: "CXO-F1"
-        prod:
-          app: "dxc-content-agent-prod"
-          rg: "CXO-F1"
+    steps:
+      # Debug the trigger
+      - name: DEBUG Inputs
+        run: |
+          echo "manual environment = '${{ github.event.inputs.environment }}'"
+          echo "manual action = '${{ github.event.inputs.action }}'"
+          echo "schedule = '${{ github.event.schedule }}'"
 
-      manual_environment: ${{ github.event.inputs.environment }}
-      manual_action: ${{ github.event.inputs.action }}
+      # Config same as reusable workflow
+      - name: Build Config
+        id: configfile
+        run: |
+          cat > config.yml <<EOF
+          rules:
+            - environment: dev
+              cron: "30 4 * * *"
+              action: start
+            - environment: staging
+              cron: "30 5 * * *"
+              action: start
+            - environment: prod
+              cron: "30 4 * * *"
+              action: start
+            - environment: dev
+              cron: "30 16 * * *"
+              action: stop
+            - environment: staging
+              cron: "30 17 * * *"
+              action: stop
+            - environment: prod
+              cron: "30 16 * * *"
+              action: stop
+          EOF
 
-  # -------------------------------------------------------------
-  # JOB 2: Success Mail (uses outputs from run_scheduler)
-  # -------------------------------------------------------------
+          cat > apps.yml <<EOF
+          dev:
+            app: dxc-content-agent-dev
+            rg: CXO-F1
+          staging:
+            app: dxc-content-agent-staging
+            rg: CXO-F1
+          prod:
+            app: dxc-content-agent-prod
+            rg: CXO-F1
+          EOF
+
+      - name: Determine Rule
+        id: decide
+        run: |
+          # Manual trigger
+          if [[ "${{ github.event.inputs.environment }}" != "" ]]; then
+            echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+            echo "action=${{ github.event.inputs.action }}" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          CURRENT_CRON="${{ github.event.schedule }}"
+
+          if [[ "$CURRENT_CRON" == "" ]]; then
+            echo "::error::No cron found and no manual inputs!"
+            exit 1
+          fi
+
+          MATCH=$(yq '.rules[] | select(.cron == "'$CURRENT_CRON'")' config.yml)
+
+          ENV=$(echo "$MATCH" | yq '.environment')
+          ACT=$(echo "$MATCH" | yq '.action')
+
+          if [[ "$ENV" == "" || "$ENV" == "null" ]]; then
+            echo "::error::No matching cron rule!"
+            exit 1
+          fi
+
+          echo "environment=$ENV" >> $GITHUB_OUTPUT
+          echo "action=$ACT" >> $GITHUB_OUTPUT
+
+      - name: Map Environment
+        id: map
+        run: |
+          ENV="${{ steps.decide.outputs.environment }}"
+          APP=$(yq ".${ENV}.app" apps.yml)
+          RG=$(yq ".${ENV}.rg" apps.yml)
+
+          echo "app=$APP" >> $GITHUB_OUTPUT
+          echo "rg=$RG" >> $GITHUB_OUTPUT
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Execute Start/Stop
+        id: exec
+        run: |
+          ACTION="${{ steps.decide.outputs.action }}"
+          APP="${{ steps.map.outputs.app }}"
+          RG="${{ steps.map.outputs.rg }}"
+          SUB="${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+
+          if [[ "$ACTION" == "start" ]]; then
+            az rest --method post \
+              --url "https://management.azure.com/subscriptions/$SUB/resourceGroups/$RG/providers/Microsoft.App/containerApps/$APP/start?api-version=2023-05-01"
+          else
+            az rest --method post \
+              --url "https://management.azure.com/subscriptions/$SUB/resourceGroups/$RG/providers/Microsoft.App/containerApps/$APP/stop?api-version=2023-05-01"
+          fi
+
+      - name: Capture Error
+        id: capture_error
+        if: always()
+        run: |
+          if [[ "${{ steps.exec.outcome }}" == "failure" ]]; then
+            echo "error=Failed at execute stage" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "error=" >> $GITHUB_OUTPUT
+
+
+  # ---------------------------------------------------------------
+  # Success Email
+  # ---------------------------------------------------------------
   success_email:
-    needs: run_scheduler
+    needs: scheduler
     if: success()
     uses: ./.github/workflows/send-mail.yml
     secrets: inherit
     with:
-      subject: "Scheduler SUCCESS - ${{ needs.run_scheduler.outputs.environment }} (${{ needs.run_scheduler.outputs.action }})"
+      subject: "Scheduler SUCCESS - ${{ needs.scheduler.outputs.environment }} (${{ needs.scheduler.outputs.action }})"
       message: |
-        <b>Environment:</b> ${{ needs.run_scheduler.outputs.environment }}<br/>
-        <b>Action:</b> ${{ needs.run_scheduler.outputs.action }}<br/>
-        <b>Time:</b> ${{ github.event.schedule || 'Manual Dispatch' }}<br/><br/>
-        Scheduler executed successfully.
+        <b>Environment:</b> ${{ needs.scheduler.outputs.environment }}<br>
+        <b>Action:</b> ${{ needs.scheduler.outputs.action }}<br>
+        <b>Time:</b> ${{ github.event.schedule || 'Manual Dispatch' }}<br>
       status: success
       from: "chinnadurai.madasamy@cxontology.com"
       to: "chinnad64@gmail.com"
 
-  # -------------------------------------------------------------
-  # JOB 3: Failure Mail
-  # -------------------------------------------------------------
+  # ---------------------------------------------------------------
+  # Failure Email
+  # ---------------------------------------------------------------
   failure_email:
-    needs: run_scheduler
+    needs: scheduler
     if: failure()
     uses: ./.github/workflows/send-mail.yml
     secrets: inherit
     with:
-      subject: "Scheduler FAILURE - ${{ needs.run_scheduler.outputs.environment || 'unknown' }} (${{ needs.run_scheduler.outputs.action || 'unknown' }})"
+      subject: "Scheduler FAILURE - ${{ needs.scheduler.outputs.environment || 'unknown' }} (${{ needs.scheduler.outputs.action || 'unknown' }})"
       message: |
-        <b>Environment:</b> ${{ needs.run_scheduler.outputs.environment || 'unknown' }}<br/>
-        <b>Action Attempted:</b> ${{ needs.run_scheduler.outputs.action || 'unknown' }}<br/>
-        <b>Error:</b><br/>
-        <span style='color:red;'>${{ needs.run_scheduler.outputs.error || 'No error captured' }}</span>
+        <b>Error:</b> ${{ needs.scheduler.outputs.error }}<br>
       status: failure
       from: "chinnadurai.madasamy@cxontology.com"
       to: "chinnad64@gmail.com"
