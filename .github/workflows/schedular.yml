@@ -54,6 +54,8 @@ jobs:
         prod:
           app: "dxc-content-agent-prod"
           rg: "CXO-F1"
+      manual_environment: ${{ github.event.inputs.environment }}
+      manual_action: ${{ github.event.inputs.action }}
 
   success_email:
     needs: scheduler
