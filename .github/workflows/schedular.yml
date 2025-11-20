@@ -1,0 +1,37 @@
+name: Unified Scheduler (Test Mode)
+
+on:
+  schedule:
+    - cron: '30 4 * * *'
+    - cron: '30 5 * * *'
+    - cron: '30 16 * * *'
+    - cron: '30 17 * * *'
+
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        required: true
+        options: [ dev, staging, prod ]
+      action:
+        type: choice
+        required: true
+        options: [ start, stop ]
+
+jobs:
+  scheduler_test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Echo Trigger Source
+        run: |
+          if [[ "${{ github.event_name }}" == "schedule" ]]; then
+            echo "Triggered by CRON: ${{ github.event.schedule }}"
+          else
+            echo "Triggered manually from UI"
+          fi
+
+      - name: Print Environment & Action
+        run: |
+          echo "Environment chosen: ${{ github.event.inputs.environment }}"
+          echo "Action chosen: ${{ github.event.inputs.action }}"
