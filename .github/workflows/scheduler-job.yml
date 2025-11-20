@@ -15,11 +15,12 @@ on:
       manual_action:
         required: false
         type: string
+
     secrets:
-          AZURE_CREDENTIALS:
-            required: true
-          AZURE_SUBSCRIPTION_ID:
-            required: true
+      AZURE_CREDENTIALS:
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        required: true
 
 jobs:
   scheduler:
@@ -37,24 +38,45 @@ jobs:
           echo "${{ inputs.config }}" > config.yml
           echo "${{ inputs.apps }}" > apps.yml
 
-      - name: Determine Rule
+      - name: Determine Rule (manual override or cron)
         id: decide
         run: |
+          # 1) Manual override via passed inputs (caller should pass manual_* when using workflow_dispatch)
           if [[ "${{ inputs.manual_environment }}" != "" && "${{ inputs.manual_environment }}" != "null" ]]; then
+            echo "Detected manual override from caller inputs."
             echo "environment=${{ inputs.manual_environment }}" >> $GITHUB_OUTPUT
             echo "action=${{ inputs.manual_action }}" >> $GITHUB_OUTPUT
             exit 0
           fi
 
+          # 2) If no manual override, fallback to checking github.event.inputs (defensive)
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            # github.event.inputs may be present when caller used workflow_dispatch directly
+            if [[ "${{ github.event.inputs.environment }}" != "" && "${{ github.event.inputs.environment }}" != "null" ]]; then
+              echo "Detected manual override from github.event.inputs."
+              echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+              echo "action=${{ github.event.inputs.action }}" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          fi
+
+          # 3) Cron branch: match current schedule string to config rules
           CURRENT_CRON="${{ github.event.schedule }}"
 
-          MATCH=$(yq '.rules[] | select(.cron == "'$CURRENT_CRON'")' config.yml)
+          # Defensive: if CURRENT_CRON is empty -> fail with useful message
+          if [[ -z "$CURRENT_CRON" ]]; then
+            echo "::warning::No schedule found in github.event.schedule (this may be a manual run without inputs)."
+            echo "::error::No matching cron rule found for empty schedule."
+            exit 1
+          fi
 
-          ENV=$(echo "$MATCH" | yq '.environment')
-          ACT=$(echo "$MATCH" | yq '.action')
+          MATCH=$(yq '.rules[] | select(.cron == "'$CURRENT_CRON'")' config.yml || true)
 
-          if [[ "$ENV" == "" || "$ENV" == "null" ]]; then
-            echo "::error::No matching cron rule found!"
+          ENV=$(echo "$MATCH" | yq '.environment' || true)
+          ACT=$(echo "$MATCH" | yq '.action' || true)
+
+          if [[ -z "$ENV" || "$ENV" == "null" ]]; then
+            echo "::error::No matching cron rule found for cron: $CURRENT_CRON"
             exit 1
           fi
 
@@ -65,11 +87,12 @@ jobs:
         id: map
         run: |
           ENV="${{ steps.decide.outputs.environment }}"
+
           APP=$(yq ".${ENV}.app" apps.yml)
           RG=$(yq ".${ENV}.rg" apps.yml)
 
-          if [[ "$APP" == "" || "$APP" == "null" ]]; then
-            echo "::error::Invalid environment mapping: $ENV"
+          if [[ -z "$APP" || "$APP" == "null" ]]; then
+            echo "::error::App mapping not found for environment: $ENV"
             exit 1
           fi
 
@@ -90,6 +113,8 @@ jobs:
           RG="${{ steps.map.outputs.rg }}"
           SUB="${{ secrets.AZURE_SUBSCRIPTION_ID }}"
 
+          echo "Action: $ACTION, App: $APP, RG: $RG, Sub: $SUB"
+
           if [[ "$ACTION" == "start" ]]; then
             az rest --method post \
               --url "https://management.azure.com/subscriptions/$SUB/resourceGroups/$RG/providers/Microsoft.App/containerApps/$APP/start?api-version=2023-05-01"
@@ -98,8 +123,28 @@ jobs:
               --url "https://management.azure.com/subscriptions/$SUB/resourceGroups/$RG/providers/Microsoft.App/containerApps/$APP/stop?api-version=2023-05-01"
           fi
 
-      - name: Capture Error
+      - name: Capture Error (always produce output for parent)
         id: capture_error
-        if: failure()
+        if: always()
         run: |
-          echo "error=Failed to execute '${{ steps.decide.outputs.action }}' for '${{ steps.decide.outputs.environment }}'" >> $GITHUB_OUTPUT
+          # Use pre-expanded outcomes to detect where failure happened.
+          # These expressions (steps.*.outcome) are expanded by GH before run.
+          DECIDE_OUTCOME="${{ steps.decide.outcome }}"
+          EXEC_OUTCOME="${{ steps.exec.outcome }}"
+
+          # Determine env/action values (may be empty)
+          ENV="${{ steps.decide.outputs.environment || 'unknown' }}"
+          ACT="${{ steps.decide.outputs.action || 'unknown' }}"
+
+          if [[ "$DECIDE_OUTCOME" == "failure" ]]; then
+            echo "error=Decision step failed (env=$ENV, action=$ACT)" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          if [[ "$EXEC_OUTCOME" == "failure" ]]; then
+            echo "error=Execute step failed (env=$ENV, action=$ACT)" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # success case -> empty error
+          echo "error=" >> $GITHUB_OUTPUT
