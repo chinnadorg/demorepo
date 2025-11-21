@@ -1,0 +1,143 @@
+name: Real Rollback to Release Tag
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Select Environment Branch to Rollback"
+        type: choice
+        required: true
+        options:
+          - DXC-Development
+          - DXC-Staging
+          - DXC-Production
+
+      tag:
+        description: "Tag to rollback to (example: dev-Release_V12)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  packages: read
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # -----------------------------------------
+      # Determine prefix based on selected branch
+      # -----------------------------------------
+      - name: Determine Environment Prefix
+        id: prefix
+        run: |
+          BRANCH="${{ github.event.inputs.branch }}"
+
+          if [[ "$BRANCH" == "DXC-Development" ]]; then
+            PREFIX="dev-"
+          elif [[ "$BRANCH" == "DXC-Staging" ]]; then
+            PREFIX="staging-"
+          elif [[ "$BRANCH" == "DXC-Production" ]]; then
+            PREFIX="prod-"
+          else
+            echo "::error::Invalid environment branch selected: $BRANCH"
+            exit 1
+          fi
+
+          echo "Using Prefix: $PREFIX"
+          echo "prefix=$PREFIX" >> $GITHUB_OUTPUT
+
+      # -----------------------------------------
+      # Show all available tags for this environment
+      # -----------------------------------------
+      - name: Show Matching Tags for This Env
+        run: |
+          git fetch --tags
+          echo "Available Tags for ${{ steps.prefix.outputs.prefix }}:"
+          git tag -l "${{ steps.prefix.outputs.prefix }}*"
+
+      # -----------------------------------------
+      # Validate tag exists and matches prefix
+      # -----------------------------------------
+      - name: Validate selected tag
+        id: validatetag
+        env:
+          TAG: ${{ github.event.inputs.tag }}
+          PREFIX: ${{ steps.prefix.outputs.prefix }}
+          REPO: ${{ github.repository }}
+        run: |
+          echo "Validating TAG=$TAG"
+
+          # Check prefix match
+          if [[ "$TAG" != "$PREFIX"* ]]; then
+            echo "::error::Tag '$TAG' does not match required prefix '$PREFIX'"
+            exit 1
+          fi
+
+          # Verify tag exists in repository
+          REPO_URL="https://github.com/$REPO.git"
+          if ! git ls-remote --tags "$REPO_URL" | grep -q "refs/tags/$TAG"; then
+            echo "::error::Tag does not exist in repo: $TAG"
+            exit 1
+          fi
+
+          echo "Tag '$TAG' is valid."
+
+      # -----------------------------------------
+      # Rollback Logic (Checkout → Build → Deploy container)
+      # Replace with your actual deployment steps
+      # -----------------------------------------
+      - name: Checkout tag and prepare for deployment
+        run: |
+          TAG="${{ github.event.inputs.tag }}"
+          echo "Checking out tag: $TAG"
+          git checkout "$TAG"
+
+      # Simulated rollback step (replace with real deployment)
+      - name: Simulate rollback deployment
+        id: deploy
+        run: |
+          echo "Rolling back environment '${{ github.event.inputs.branch }}' to tag '${{ github.event.inputs.tag }}'"
+          echo "Rollback simulated successfully"
+
+      # -----------------------------------------
+      # Send Success Mail
+      # -----------------------------------------
+      - name: Send Success Mail
+        if: success()
+        uses: ./.github/workflows/send-mail.yml
+        secrets: inherit
+        with:
+          subject: "ROLLBACK SUCCESS — ${{ github.event.inputs.tag }}"
+          message: |
+            <b>Rollback Status:</b> SUCCESS<br/>
+            <b>Environment:</b> ${{ github.event.inputs.branch }}<br/>
+            <b>Rolled Back To:</b> ${{ github.event.inputs.tag }}<br/><br/>
+            Rollback completed successfully.
+          status: success
+          from: "chinnadurai.madasamy@cxontology.com"
+          to: "chinnad64@gmail.com, team@company.com"
+
+      # -----------------------------------------
+      # Send Failure Mail
+      # -----------------------------------------
+      - name: Send Failure Mail
+        if: failure()
+        uses: ./.github/workflows/send-mail.yml
+        secrets: inherit
+        with:
+          subject: "ROLLBACK FAILED — ${{ github.event.inputs.tag }}"
+          message: |
+            <b>Rollback Status:</b> FAILED<br/>
+            <b>Environment:</b> ${{ github.event.inputs.branch }}<br/>
+            <b>Tag Attempted:</b> ${{ github.event.inputs.tag }}<br/><br/>
+            Please check workflow logs for details.
+          status: failure
+          from: "chinnadurai.madasamy@cxontology.com"
+          to: "chinnad64@gmail.com, team@company.com"
