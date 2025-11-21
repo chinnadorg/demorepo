@@ -69,17 +69,17 @@ jobs:
 
       - name: Wait for Quality Gate and fetch result
         id: qg_check
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           set -e
 
           PROJECT_KEY="chinnadorg_demorepo"
-          AUTH="${{ secrets.SONAR_TOKEN }}:"
+          AUTH="$SONAR_TOKEN:"
 
-          # -------------------------
-          # 1) Wait for Quality Gate
-          # -------------------------
           ATTEMPTS=0
           STATUS=""
+
           while [ $ATTEMPTS -lt 12 ]; do
             JSON=$(curl -s -u "$AUTH" \
               "https://sonarcloud.io/api/qualitygates/project_status?projectKey=$PROJECT_KEY")
@@ -94,21 +94,12 @@ jobs:
             sleep 10
           done
 
-          if [ -z "$STATUS" ]; then
-            echo "qg_status=UNKNOWN" >> $GITHUB_OUTPUT
-            echo "qg_coverage=" >> $GITHUB_OUTPUT
-            echo "qg_bugs=" >> $GITHUB_OUTPUT
-            echo "qg_vulnerabilities=" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
           echo "qg_status=$STATUS" >> $GITHUB_OUTPUT
 
-          # -------------------------
-          # 2) Fetch Coverage / Bugs / Vulnerabilities
-          # -------------------------
           METRICS=$(curl -s -u "$AUTH" \
             "https://sonarcloud.io/api/measures/component?component=$PROJECT_KEY&metricKeys=coverage,bugs,vulnerabilities")
+
+          echo "METRICS JSON: $METRICS"
 
           COVERAGE=$(echo "$METRICS" | jq -r '.component.measures[] | select(.metric=="coverage") | .value // ""')
           BUGS=$(echo "$METRICS" | jq -r '.component.measures[] | select(.metric=="bugs") | .value // ""')
@@ -117,6 +108,7 @@ jobs:
           echo "qg_coverage=$COVERAGE" >> $GITHUB_OUTPUT
           echo "qg_bugs=$BUGS" >> $GITHUB_OUTPUT
           echo "qg_vulnerabilities=$VULN" >> $GITHUB_OUTPUT
+
 
   # ----------------------------
   # Job: Build, Tag, Release, Deploy
