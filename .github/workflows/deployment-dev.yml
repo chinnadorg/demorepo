@@ -3,11 +3,12 @@ name: Dev Build & Deploy
 on:
   push:
     branches: [ main ]
-    #types: [closed]
 
 env:
   CONTAINER_APP_NAME: "dxc-content-agent-dev"
+  RESOURCE_GROUP: "CXO-F1"
   ENVIRONMENT_NAME: "DXC-CXOF1-Demo"
+  LOCATION: "centralindia"
 
 permissions:
   contents: write
@@ -22,21 +23,24 @@ jobs:
       error: ${{ steps.err.outputs.error }}
 
     steps:
+      # -------------------------------------------------------
+      # 1. Checkout
+      # -------------------------------------------------------
       - name: Checkout Repo
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       # -------------------------------------------------------
-      # 1. Login to Azure
+      # 2. Azure Login
       # -------------------------------------------------------
-      - name: Login to Azure
+      - name: Azure Login
         uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       # -------------------------------------------------------
-      # 2. Login to GHCR
+      # 3. GHCR Login
       # -------------------------------------------------------
       - name: Login to GHCR
         uses: docker/login-action@v3
@@ -46,7 +50,7 @@ jobs:
           password: ${{ secrets.GHCR_PAT }}
 
       # -------------------------------------------------------
-      # 3. Auto-Increment Release Tag
+      # 4. Create Auto-Increment Release Tag
       # -------------------------------------------------------
       - name: Create Auto-Increment Release Tag
         id: tag
@@ -72,7 +76,7 @@ jobs:
           echo "NEXT_TAG=$NEXT_TAG" >> $GITHUB_OUTPUT
 
       # -------------------------------------------------------
-      # 4. Create GitHub Release
+      # 5. Create GitHub Release
       # -------------------------------------------------------
       - name: Create GitHub Release
         uses: actions/create-release@v1
@@ -85,11 +89,10 @@ jobs:
           prerelease: false
 
       # -------------------------------------------------------
-      # 5. Build & Deploy Container App
+      # 6. Build & Deploy Container App
       # -------------------------------------------------------
       # - name: Build and Deploy
       #   id: deploy
-      #   run: echo "Deploying container..."
       #   uses: azure/container-apps-deploy-action@v1
       #   with:
       #     appSourcePath: ${{ github.workspace }}
@@ -97,23 +100,22 @@ jobs:
       #     registryUsername: ${{ secrets.GHCR_USERNAME }}
       #     registryPassword: ${{ secrets.GHCR_PAT }}
       #     containerAppName: ${{ env.CONTAINER_APP_NAME }}
-      #     resourceGroup: ${{ secrets.RESOURCE_GROUP }}
+      #     resourceGroup: ${{ env.RESOURCE_GROUP }}
       #     containerAppEnvironment: ${{ env.ENVIRONMENT_NAME }}
-      #     location: ${{ secrets.AZURE_LOCATION }}
-      #     imageToBuild: ghcr.io/cxorepo/dxc-content-agent-dev:${{ github.sha }}
+      #     location: ${{ env.LOCATION }}
+      #     imageToBuild: ghcr.io/${{ secrets.GHCR_USERNAME }}/dxc-content-agent:${{ github.sha }}
 
       # -------------------------------------------------------
-      # 6. Capture Errors for Mail
+      # 7. Capture Error
       # -------------------------------------------------------
       - name: Capture Error
         id: err
         if: failure()
         run: |
-          echo "error=Deployment failed for tag ${{ steps.tag.outputs.NEXT_TAG }}" >> $GITHUB_OUTPUT
-
+          echo "error=Deployment failed at step: ${{ steps.deploy.outcome }}" >> $GITHUB_OUTPUT
 
   # ---------------------------------------------------------------------
-  # SUCCESS MAIL
+  # SUCCESS EMAIL
   # ---------------------------------------------------------------------
   success_email:
     needs: build-and-deploy
@@ -121,17 +123,17 @@ jobs:
     uses: ./.github/workflows/send-mail.yml
     secrets: inherit
     with:
-      subject: "DEV DEPLOYMENT SUCCESS - ${{ needs.build-and-deploy.outputs.tag }}"
+      subject: "DEV DEPLOYMENT SUCCESS — ${{ needs.build-and-deploy.outputs.tag }}"
       message: |
         <b>Tag:</b> ${{ needs.build-and-deploy.outputs.tag }}<br/>
         <b>Status:</b> Successful<br/>
         <b>Environment:</b> Development<br/>
       status: success
       from: "chinnadurai.madasamy@cxontology.com"
-      to: "chinnad64@gmail.com, someoneelse@example.com"
+      to: "chinnad64@gmail.com, team@company.com"
 
   # ---------------------------------------------------------------------
-  # FAILURE MAIL
+  # FAILURE EMAIL
   # ---------------------------------------------------------------------
   failure_email:
     needs: build-and-deploy
@@ -143,6 +145,7 @@ jobs:
       message: |
         <b>Tag:</b> ${{ needs.build-and-deploy.outputs.tag }}<br/>
         <b>Error:</b> ${{ needs.build-and-deploy.outputs.error }}<br/>
+        <b>Environment:</b> Development<br/>
       status: failure
       from: "chinnadurai.madasamy@cxontology.com"
-      to: "chinnad64@gmail.com, someoneelse@example.com"
+      to: "chinnad64@gmail.com, team@company.com"
