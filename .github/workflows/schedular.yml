@@ -168,4 +168,4 @@ jobs:
         <b>Error:</b> ${{ needs.scheduler.outputs.error }}<br>
       status: failure
       from: "chinnadurai.madasamy@cxontology.com"
-      to: "chinnad64@gmail.com"
+      to: "chinnad64@gmail.com,kishorekumar.chandran@cxontology.com"

@@ -12,7 +12,6 @@ on:
       status:
         required: true
         type: string
-        description: "success or failure"
       from:
         required: true
         type: string
@@ -78,9 +77,20 @@ jobs:
 
           echo "token=$(echo $AUTH | jq -r '.access_token')" >> $GITHUB_OUTPUT
 
-      - name: Send HTML Email
+      - name: Send HTML Email (Multi-Recipient)
         run: |
           BODY=$(sed 's/"/\\"/g' email.html | tr -d '\n')
+
+          # Build JSON recipient array from comma-separated list
+          RECIPIENTS=""
+          IFS=',' read -ra ADDR <<< "${{ inputs.to }}"
+          for email in "${ADDR[@]}"; do
+            email_trimmed=$(echo "$email" | xargs)
+            RECIPIENTS="$RECIPIENTS{\"emailAddress\":{\"address\":\"$email_trimmed\"}},"
+          done
+
+          # Remove trailing comma and wrap in array brackets
+          RECIPIENTS="[${RECIPIENTS%,}]"
 
           curl -s -X POST \
             -H "Authorization: Bearer ${{ steps.token.outputs.token }}" \
@@ -92,11 +102,7 @@ jobs:
                   \"contentType\": \"HTML\",
                   \"content\": \"$BODY\"
                 },
-                \"toRecipients\": [
-                  {
-                    \"emailAddress\": {\"address\": \"${{ inputs.to }}\"}
-                  }
-                ]
+                \"toRecipients\": $RECIPIENTS
               },
               \"saveToSentItems\": \"false\"
             }" \
