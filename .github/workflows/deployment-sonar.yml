@@ -18,24 +18,25 @@ permissions:
 
 jobs:
 
-  # ----------------------------
-  # Job: Sonar Analysis + Quality Gate fetch
-  # ----------------------------
+  # ============================================================
+  # JOB 1 — SONAR ANALYSIS + QUALITY GATE EXTRACTION
+  # ============================================================
   sonar:
     name: SonarCloud Analysis & Quality Gate
     runs-on: ubuntu-latest
+
     outputs:
       qg_status: ${{ steps.qg_check.outputs.qg_status }}
       qg_coverage: ${{ steps.qg_check.outputs.qg_coverage }}
       qg_bugs: ${{ steps.qg_check.outputs.qg_bugs }}
       qg_vulnerabilities: ${{ steps.qg_check.outputs.qg_vulnerabilities }}
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Set up Python (for tests/coverage)
+      - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.10"
@@ -43,18 +44,17 @@ jobs:
       - name: Install dependencies & test tools
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt || true; fi
           pip install pytest coverage jq
 
-      - name: Run Tests & Generate Coverage (if tests exist)
+      - name: Run Tests & Generate Coverage
         run: |
           set -e || true
-          if [ -f setup.cfg ] || [ -d tests ] || [ -f requirements.txt ]; then
+          if [ -d tests ]; then
             coverage erase || true
             coverage run -m pytest || true
             coverage xml -i || true
           else
-            echo "No tests detected; skipping coverage/test step."
+            echo "No tests detected"
           fi
 
       - name: SonarCloud Scan
@@ -63,34 +63,26 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          # relying on sonar-project.properties in repo for projectKey and other settings
-          projectBaseDir: .
 
-      - name: Wait for Quality Gate and fetch result
+      - name: Wait for Quality Gate
         id: qg_check
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           set -e
-
           PROJECT_KEY="chinnadorg_demorepo"
           AUTH="$SONAR_TOKEN:"
 
           ATTEMPTS=0
           STATUS=""
-
           while [ $ATTEMPTS -lt 12 ]; do
             JSON=$(curl -s -u "$AUTH" \
               "https://sonarcloud.io/api/qualitygates/project_status?projectKey=$PROJECT_KEY")
 
             STATUS=$(echo "$JSON" | jq -r '.projectStatus.status // empty')
+            [ "$STATUS" != "" ] && [ "$STATUS" != "PENDING" ] && break
 
-            if [ "$STATUS" != "" ] && [ "$STATUS" != "PENDING" ]; then
-              break
-            fi
-
-            ATTEMPTS=$((ATTEMPTS + 1))
+            ATTEMPTS=$((ATTEMPTS+1))
             sleep 10
           done
 
@@ -211,44 +203,41 @@ jobs:
   # Success Email (includes Sonar QG details)
   # ----------------------------
   success_email:
-    needs: build-and-deploy
+    needs: [sonar, build_and_deploy]
     if: success()
     uses: ./.github/workflows/send-mail.yml
     secrets: inherit
     with:
-      subject: "DEV DEPLOYMENT SUCCESS — ${{ needs.build-and-deploy.outputs.tag }}"
+      subject: "DEV DEPLOYMENT SUCCESS — ${{ needs.build_and_deploy.outputs.tag }}"
       message: |
-        <b>Tag:</b> ${{ needs.build-and-deploy.outputs.tag }}<br/>
-        <b>Status:</b> Successful<br/>
-        <b>Environment:</b> Development<br/>
-        <hr/>
+        <b>Tag:</b> ${{ needs.build_and_deploy.outputs.tag }}<br/>
+        <b>Status:</b> Success<br/>
+        <b>Environment:</b> Development<br/><hr/>
         <b>Sonar Quality Gate:</b> ${{ needs.sonar.outputs.qg_status }}<br/>
-        <b>Coverage:</b> ${{ needs.sonar.outputs.qg_coverage || 'N/A' }}%<br/>
-        <b>Bugs:</b> ${{ needs.sonar.outputs.qg_bugs || '0' }}<br/>
-        <b>Vulnerabilities:</b> ${{ needs.sonar.outputs.qg_vulnerabilities || '0' }}<br/>
+        <b>Coverage:</b> ${{ needs.sonar.outputs.qg_coverage }}%<br/>
+        <b>Bugs:</b> ${{ needs.sonar.outputs.qg_bugs }}<br/>
+        <b>Vulnerabilities:</b> ${{ needs.sonar.outputs.qg_vulnerabilities }}<br/>
       status: success
       from: "chinnadurai.madasamy@cxontology.com"
       to: "chinnad64@gmail.com, team@company.com"
 
-  # ----------------------------
-  # Failure Email (includes Sonar QG details)
-  # ----------------------------
+
+  # ============================================================
+  # JOB 4 — FAILURE EMAIL
+  # ============================================================
   failure_email:
-    needs: build-and-deploy
+    needs: [sonar, build_and_deploy]
     if: failure()
     uses: ./.github/workflows/send-mail.yml
     secrets: inherit
     with:
-      subject: "DEV DEPLOYMENT FAILED — ${{ needs.build-and-deploy.outputs.tag || 'unknown' }}"
+      subject: "DEV DEPLOYMENT FAILED — ${{ needs.build_and_deploy.outputs.tag || 'unknown' }}"
       message: |
-        <b>Tag:</b> ${{ needs.build-and-deploy.outputs.tag || 'unknown' }}<br/>
-        <b>Environment:</b> Development<br/>
-        <b>Error:</b> ${{ needs.build-and-deploy.outputs.error || 'See job logs' }}<br/>
-        <hr/>
+        <b>Error:</b> ${{ needs.build_and_deploy.outputs.error }}<br/><hr/>
         <b>Sonar Quality Gate:</b> ${{ needs.sonar.outputs.qg_status }}<br/>
-        <b>Coverage:</b> ${{ needs.sonar.outputs.qg_coverage || 'N/A' }}%<br/>
-        <b>Bugs:</b> ${{ needs.sonar.outputs.qg_bugs || '0' }}<br/>
-        <b>Vulnerabilities:</b> ${{ needs.sonar.outputs.qg_vulnerabilities || '0' }}<br/>
+        <b>Coverage:</b> ${{ needs.sonar.outputs.qg_coverage }}%<br/>
+        <b>Bugs:</b> ${{ needs.sonar.outputs.qg_bugs }}<br/>
+        <b>Vulnerabilities:</b> ${{ needs.sonar.outputs.qg_vulnerabilities }}<br/>
       status: failure
       from: "chinnadurai.madasamy@cxontology.com"
       to: "chinnad64@gmail.com, team@company.com"
