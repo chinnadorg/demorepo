@@ -71,22 +71,25 @@ jobs:
         id: qg_check
         run: |
           set -e
-          # project key from sonar-project.properties - we hardcode as provided
+
           PROJECT_KEY="chinnadorg_demorepo"
-          # Poll SonarCloud API for status (gives projectStatus)
-          # Use token auth (token:)
           AUTH="${{ secrets.SONAR_TOKEN }}:"
 
+          # -------------------------
+          # 1) Wait for Quality Gate
+          # -------------------------
           ATTEMPTS=0
           STATUS=""
-          JSON=""
-          # Poll for up to ~3 minutes (adjust attempts/sleep if needed)
           while [ $ATTEMPTS -lt 12 ]; do
-            JSON=$(curl -s -u "$AUTH" "https://sonarcloud.io/api/qualitygates/project_status?projectKey=$PROJECT_KEY")
+            JSON=$(curl -s -u "$AUTH" \
+              "https://sonarcloud.io/api/qualitygates/project_status?projectKey=$PROJECT_KEY")
+
             STATUS=$(echo "$JSON" | jq -r '.projectStatus.status // empty')
-            if [ -n "$STATUS" ] && [ "$STATUS" != "PENDING" ]; then
+
+            if [ "$STATUS" != "" ] && [ "$STATUS" != "PENDING" ]; then
               break
             fi
+
             ATTEMPTS=$((ATTEMPTS + 1))
             sleep 10
           done
@@ -99,18 +102,18 @@ jobs:
             exit 0
           fi
 
-          # Extract some useful measures (coverage, bugs, vulnerabilities)
-          # The JSON contains projectStatus.projectMeasures[] with metric & value
-          COVERAGE=$(echo "$JSON" | jq -r '.projectStatus.projectMeasures[] | select(.metric=="coverage") | .value' || true)
-          BUGS=$(echo "$JSON" | jq -r '.projectStatus.projectMeasures[] | select(.metric=="bugs") | .value' || true)
-          VULN=$(echo "$JSON" | jq -r '.projectStatus.projectMeasures[] | select(.metric=="vulnerabilities") | .value' || true)
-
-          # Fallback to empty if "null"
-          if [ "$COVERAGE" = "null" ]; then COVERAGE=""; fi
-          if [ "$BUGS" = "null" ]; then BUGS=""; fi
-          if [ "$VULN" = "null" ]; then VULN=""; fi
-
           echo "qg_status=$STATUS" >> $GITHUB_OUTPUT
+
+          # -------------------------
+          # 2) Fetch Coverage / Bugs / Vulnerabilities
+          # -------------------------
+          METRICS=$(curl -s -u "$AUTH" \
+            "https://sonarcloud.io/api/measures/component?component=$PROJECT_KEY&metricKeys=coverage,bugs,vulnerabilities")
+
+          COVERAGE=$(echo "$METRICS" | jq -r '.component.measures[] | select(.metric=="coverage") | .value // ""')
+          BUGS=$(echo "$METRICS" | jq -r '.component.measures[] | select(.metric=="bugs") | .value // ""')
+          VULN=$(echo "$METRICS" | jq -r '.component.measures[] | select(.metric=="vulnerabilities") | .value // ""')
+
           echo "qg_coverage=$COVERAGE" >> $GITHUB_OUTPUT
           echo "qg_bugs=$BUGS" >> $GITHUB_OUTPUT
           echo "qg_vulnerabilities=$VULN" >> $GITHUB_OUTPUT
