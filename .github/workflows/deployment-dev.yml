@@ -1,8 +1,8 @@
 name: Dev Build & Deploy
 
 on:
-  push:
-    branches: [ main ]
+  pull_request:
+    branches: [ DXC-Development ]
 
 env:
   CONTAINER_APP_NAME: "dxc-content-agent-dev"
@@ -37,7 +37,7 @@ jobs:
       - name: Azure Login
         uses: azure/login@v1
         with:
-          creds: ${{ secrets.AZURE_CREDENTIAL }}
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       # -------------------------------------------------------
       # 3. GHCR Login
@@ -46,8 +46,8 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: ${{ secrets.GIT_USERNAME }}
-          password: ${{ secrets.GIT_TOKEN }}
+          username: ${{ secrets.GHCR_USERNAME }}
+          password: ${{ secrets.GHCR_PAT }}
 
       # -------------------------------------------------------
       # 4. Create Auto-Increment Release Tag
@@ -91,19 +91,19 @@ jobs:
       # -------------------------------------------------------
       # 6. Build & Deploy Container App
       # -------------------------------------------------------
-      # - name: Build and Deploy
-      #   id: deploy
-      #   uses: azure/container-apps-deploy-action@v1
-      #   with:
-      #     appSourcePath: ${{ github.workspace }}
-      #     registryUrl: ghcr.io
-      #     registryUsername: ${{ secrets.GHCR_USERNAME }}
-      #     registryPassword: ${{ secrets.GHCR_PAT }}
-      #     containerAppName: ${{ env.CONTAINER_APP_NAME }}
-      #     resourceGroup: ${{ env.RESOURCE_GROUP }}
-      #     containerAppEnvironment: ${{ env.ENVIRONMENT_NAME }}
-      #     location: ${{ env.LOCATION }}
-      #     imageToBuild: ghcr.io/${{ secrets.GHCR_USERNAME }}/dxc-content-agent:${{ github.sha }}
+      - name: Build and Deploy
+        id: deploy
+        uses: azure/container-apps-deploy-action@v1
+        with:
+          appSourcePath: ${{ github.workspace }}
+          registryUrl: ghcr.io
+          registryUsername: ${{ secrets.GHCR_USERNAME }}
+          registryPassword: ${{ secrets.GHCR_PAT }}
+          containerAppName: ${{ env.CONTAINER_APP_NAME }}
+          resourceGroup: ${{ env.RESOURCE_GROUP }}
+          containerAppEnvironment: ${{ env.ENVIRONMENT_NAME }}
+          location: ${{ env.LOCATION }}
+          imageToBuild: ghcr.io/${{ secrets.GHCR_USERNAME }}/dxc-content-agent:${{ github.sha }}
 
       # -------------------------------------------------------
       # 7. Capture Error
