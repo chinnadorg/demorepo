@@ -32,21 +32,18 @@ jobs:
       qg_vulnerabilities: ${{ steps.qg_check.outputs.qg_vulnerabilities }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.10"
-
-      - name: Install dependencies & test tools
+      - name: Install Dependencies (FastAPI + Tests)
         run: |
-          python -m pip install --upgrade pip
-          pip install pytest coverage jq
+          python3 -m pip install --upgrade pip
+          pip install fastapi uvicorn pytest coverage jq
+          if [ -f requirements.txt ]; then pip install -r requirements.txt || true; fi
 
-      - name: Run Tests & Generate Coverage
+      - name: Run Tests & Coverage (Non-Blocking)
         run: |
           set -e || true
           if [ -d tests ]; then
@@ -58,31 +55,36 @@ jobs:
           fi
 
       - name: SonarCloud Scan
-        id: sonar_scan
         uses: SonarSource/sonarcloud-github-action@v2
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectBaseDir: .
 
-      - name: Wait for Quality Gate
+      - name: Wait for Quality Gate Result
         id: qg_check
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           set -e
+
           PROJECT_KEY="chinnadorg_demorepo"
           AUTH="$SONAR_TOKEN:"
 
           ATTEMPTS=0
           STATUS=""
+
           while [ $ATTEMPTS -lt 12 ]; do
             JSON=$(curl -s -u "$AUTH" \
               "https://sonarcloud.io/api/qualitygates/project_status?projectKey=$PROJECT_KEY")
-
             STATUS=$(echo "$JSON" | jq -r '.projectStatus.status // empty')
-            [ "$STATUS" != "" ] && [ "$STATUS" != "PENDING" ] && break
 
-            ATTEMPTS=$((ATTEMPTS+1))
+            if [ "$STATUS" != "" ] && [ "$STATUS" != "PENDING" ]; then
+              break
+            fi
+
+            ATTEMPTS=$((ATTEMPTS + 1))
             sleep 10
           done
 
@@ -91,8 +93,6 @@ jobs:
           METRICS=$(curl -s -u "$AUTH" \
             "https://sonarcloud.io/api/measures/component?component=$PROJECT_KEY&metricKeys=coverage,bugs,vulnerabilities")
 
-          echo "METRICS JSON: $METRICS"
-
           COVERAGE=$(echo "$METRICS" | jq -r '.component.measures[] | select(.metric=="coverage") | .value // ""')
           BUGS=$(echo "$METRICS" | jq -r '.component.measures[] | select(.metric=="bugs") | .value // ""')
           VULN=$(echo "$METRICS" | jq -r '.component.measures[] | select(.metric=="vulnerabilities") | .value // ""')
@@ -100,7 +100,6 @@ jobs:
           echo "qg_coverage=$COVERAGE" >> $GITHUB_OUTPUT
           echo "qg_bugs=$BUGS" >> $GITHUB_OUTPUT
           echo "qg_vulnerabilities=$VULN" >> $GITHUB_OUTPUT
-
 
   # ----------------------------
   # Job: Build, Tag, Release, Deploy
