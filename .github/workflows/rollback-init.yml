@@ -1,143 +1,175 @@
-name: Real Rollback to Release Tag
+name: Real Rollback Deployment
 
 on:
   workflow_dispatch:
     inputs:
-      branch:
-        description: "Select Environment Branch to Rollback"
+      environment:
+        description: "Choose Environment to Rollback"
         type: choice
         required: true
         options:
-          - DXC-Development
-          - DXC-Staging
-          - DXC-Production
-
+          - dev
+          - staging
+          - prod
       tag:
-        description: "Tag to rollback to (example: dev-Release_V12)"
+        description: "Tag to rollback to (ex: Release_V5)"
         required: true
-        type: string
 
 permissions:
   contents: write
-  packages: read
+  packages: write
 
 jobs:
   rollback:
     runs-on: ubuntu-latest
 
+    outputs:
+      status: ${{ steps.result.outputs.status || steps.result_error.outputs.status }}
+      tag: ${{ steps.result.outputs.tag || steps.result_error.outputs.tag }}
+      error: ${{ steps.result_error.outputs.error }}
+
     steps:
+      # -----------------------------------------------------------
+      # Checkout main repository
+      # -----------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # -----------------------------------------
-      # Determine prefix based on selected branch
-      # -----------------------------------------
-      - name: Determine Environment Prefix
-        id: prefix
+      # -----------------------------------------------------------
+      # Validate Tag Exists
+      # -----------------------------------------------------------
+      - name: Validate Tag
+        id: validate
         run: |
-          BRANCH="${{ github.event.inputs.branch }}"
+          echo "Checking Tag: ${{ github.event.inputs.tag }}"
+          if ! git rev-parse "refs/tags/${{ github.event.inputs.tag }}" >/dev/null 2>&1; then
+            echo "Tag does not exist"
+            exit 1
+          fi
+        shell: bash
 
-          if [[ "$BRANCH" == "DXC-Development" ]]; then
-            PREFIX="dev-"
-          elif [[ "$BRANCH" == "DXC-Staging" ]]; then
-            PREFIX="staging-"
-          elif [[ "$BRANCH" == "DXC-Production" ]]; then
-            PREFIX="prod-"
+      # -----------------------------------------------------------
+      # Checkout Code of Selected Tag
+      # -----------------------------------------------------------
+      - name: Checkout Tagged Source
+        run: |
+          git checkout tags/${{ github.event.inputs.tag }}
+        shell: bash
+
+      # -----------------------------------------------------------
+      # Map environment to Azure resources
+      # -----------------------------------------------------------
+      - name: Select Deployment Settings
+        id: envmap
+        run: |
+          if [ "${{ github.event.inputs.environment }}" = "dev" ]; then
+            echo "container=dxc-content-agent-dev" >> $GITHUB_OUTPUT
+            echo "resource_group=CXO-F1" >> $GITHUB_OUTPUT
+            echo "container_env=DXC-CXOF1-Demo" >> $GITHUB_OUTPUT
+            echo "location=centralindia" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.inputs.environment }}" = "staging" ]; then
+            echo "container=dxc-content-agent-stg" >> $GITHUB_OUTPUT
+            echo "resource_group=CXO-STG" >> $GITHUB_OUTPUT
+            echo "container_env=DXC-CXOF1-Staging" >> $GITHUB_OUTPUT
+            echo "location=centralindia" >> $GITHUB_OUTPUT
           else
-            echo "::error::Invalid environment branch selected: $BRANCH"
-            exit 1
+            echo "container=dxc-content-agent-prod" >> $GITHUB_OUTPUT
+            echo "resource_group=CXO-PROD" >> $GITHUB_OUTPUT
+            echo "container_env=DXC-CXOF1-Production" >> $GITHUB_OUTPUT
+            echo "location=centralindia" >> $GITHUB_OUTPUT
           fi
 
-          echo "Using Prefix: $PREFIX"
-          echo "prefix=$PREFIX" >> $GITHUB_OUTPUT
+      # -----------------------------------------------------------
+      # Azure Login
+      # -----------------------------------------------------------
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # -----------------------------------------
-      # Show all available tags for this environment
-      # -----------------------------------------
-      - name: Show Matching Tags for This Env
-        run: |
-          git fetch --tags
-          echo "Available Tags for ${{ steps.prefix.outputs.prefix }}:"
-          git tag -l "${{ steps.prefix.outputs.prefix }}*"
+      # -----------------------------------------------------------
+      # Login to GHCR
+      # -----------------------------------------------------------
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ secrets.GIT_USERNAME }}
+          password: ${{ secrets.GIT_TOKEN }}
 
-      # -----------------------------------------
-      # Validate tag exists and matches prefix
-      # -----------------------------------------
-      - name: Validate selected tag
-        id: validatetag
-        env:
-          TAG: ${{ github.event.inputs.tag }}
-          PREFIX: ${{ steps.prefix.outputs.prefix }}
-          REPO: ${{ github.repository }}
-        run: |
-          echo "Validating TAG=$TAG"
-
-          # Check prefix match
-          if [[ "$TAG" != "$PREFIX"* ]]; then
-            echo "::error::Tag '$TAG' does not match required prefix '$PREFIX'"
-            exit 1
-          fi
-
-          # Verify tag exists in repository
-          REPO_URL="https://github.com/$REPO.git"
-          if ! git ls-remote --tags "$REPO_URL" | grep -q "refs/tags/$TAG"; then
-            echo "::error::Tag does not exist in repo: $TAG"
-            exit 1
-          fi
-
-          echo "Tag '$TAG' is valid."
-
-      # -----------------------------------------
-      # Rollback Logic (Checkout → Build → Deploy container)
-      # Replace with your actual deployment steps
-      # -----------------------------------------
-      - name: Checkout tag and prepare for deployment
-        run: |
-          TAG="${{ github.event.inputs.tag }}"
-          echo "Checking out tag: $TAG"
-          git checkout "$TAG"
-
-      # Simulated rollback step (replace with real deployment)
-      - name: Simulate rollback deployment
+      # -----------------------------------------------------------
+      # Build container from this tag and deploy
+      # -----------------------------------------------------------
+      - name: Build & Deploy Container App
         id: deploy
-        run: |
-          echo "Rolling back environment '${{ github.event.inputs.branch }}' to tag '${{ github.event.inputs.tag }}'"
-          echo "Rollback simulated successfully"
+        uses: azure/container-apps-deploy-action@v1
+        with:
+          appSourcePath: ${{ github.workspace }}
+          registryUrl: ghcr.io
+          registryUsername: ${{ secrets.GHCR_USERNAME }}
+          registryPassword: ${{ secrets.GHCR_PAT }}
+          containerAppName: ${{ steps.envmap.outputs.container }}
+          resourceGroup: ${{ steps.envmap.outputs.resource_group }}
+          containerAppEnvironment: ${{ steps.envmap.outputs.container_env }}
+          location: ${{ steps.envmap.outputs.location }}
+          imageToBuild: ghcr.io/${{ secrets.GHCR_USERNAME }}/dxc-content-agent:${{ github.event.inputs.tag }}
 
-      # -----------------------------------------
-      # Send Success Mail
-      # -----------------------------------------
-      - name: Send Success Mail
+      # -----------------------------------------------------------
+      # Store success output
+      # -----------------------------------------------------------
+      - name: Store success output
         if: success()
-        uses: ./.github/workflows/send-mail.yml
-        secrets: inherit
-        with:
-          subject: "ROLLBACK SUCCESS — ${{ github.event.inputs.tag }}"
-          message: |
-            <b>Rollback Status:</b> SUCCESS<br/>
-            <b>Environment:</b> ${{ github.event.inputs.branch }}<br/>
-            <b>Rolled Back To:</b> ${{ github.event.inputs.tag }}<br/><br/>
-            Rollback completed successfully.
-          status: success
-          from: "chinnadurai.madasamy@cxontology.com"
-          to: "chinnad64@gmail.com, team@company.com"
+        id: result
+        run: |
+          echo "status=success" >> $GITHUB_OUTPUT
+          echo "tag=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
 
-      # -----------------------------------------
-      # Send Failure Mail
-      # -----------------------------------------
-      - name: Send Failure Mail
+      # -----------------------------------------------------------
+      # Capture failure
+      # -----------------------------------------------------------
+      - name: Capture Error
         if: failure()
-        uses: ./.github/workflows/send-mail.yml
-        secrets: inherit
-        with:
-          subject: "ROLLBACK FAILED — ${{ github.event.inputs.tag }}"
-          message: |
-            <b>Rollback Status:</b> FAILED<br/>
-            <b>Environment:</b> ${{ github.event.inputs.branch }}<br/>
-            <b>Tag Attempted:</b> ${{ github.event.inputs.tag }}<br/><br/>
-            Please check workflow logs for details.
-          status: failure
-          from: "chinnadurai.madasamy@cxontology.com"
-          to: "chinnad64@gmail.com, team@company.com"
+        id: result_error
+        run: |
+          echo "status=failure" >> $GITHUB_OUTPUT
+          echo "tag=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+          echo "error=Rollback failed at deployment" >> $GITHUB_OUTPUT
+
+  # ============================================================
+  # SUCCESS EMAIL
+  # ============================================================
+  rollback_success_email:
+    needs: rollback
+    if: needs.rollback.outputs.status == 'success'
+    uses: ./.github/workflows/send-mail.yml
+    secrets: inherit
+    with:
+      subject: "ROLLBACK SUCCESS — ${{ needs.rollback.outputs.tag }}"
+      message: |
+        <b>Rollback Completed Successfully</b><br/>
+        <b>Tag:</b> ${{ needs.rollback.outputs.tag }}<br/>
+        <b>Environment:</b> ${{ github.event.inputs.environment }}<br/>
+      status: success
+      from: "chinnadurai.madasamy@cxontology.com"
+      to: "chinnad64@gmail.com, team@company.com"
+
+  # ============================================================
+  # FAILURE EMAIL
+  # ============================================================
+  rollback_failure_email:
+    needs: rollback
+    if: needs.rollback.outputs.status == 'failure'
+    uses: ./.github/workflows/send-mail.yml
+    secrets: inherit
+    with:
+      subject: "ROLLBACK FAILED — ${{ needs.rollback.outputs.tag }}"
+      message: |
+        <b>Rollback Failed</b><br/>
+        <b>Tag:</b> ${{ needs.rollback.outputs.tag }}<br/>
+        <b>Error:</b> ${{ needs.rollback.outputs.error }}<br/>
+        <b>Environment:</b> ${{ github.event.inputs.environment }}<br/>
+      status: failure
+      from: "chinnadurai.madasamy@cxontology.com"
+      to: "chinnad64@gmail.com, team@company.com"

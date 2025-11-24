@@ -160,7 +160,7 @@ jobs:
           else
             NUM=$(echo $LAST_TAG | sed 's/Release_V//')
             NEXT_NUM=$((NUM + 1))
-            NEXT_TAG="Release_V$NEXT_NUM"
+            NEXT_TAG="DEV_Release_V$NEXT_NUM"
           fi
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
