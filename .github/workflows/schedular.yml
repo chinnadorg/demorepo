@@ -2,10 +2,10 @@ name: Unified Scheduler
 
 on:
   schedule:
-    - cron: "30 4 * * *"
-    - cron: "30 5 * * *"
-    - cron: "30 16 * * *"
-    - cron: "30 17 * * *"
+    # - cron: "30 4 * * *"
+    # - cron: "30 5 * * *"
+    # - cron: "30 16 * * *"
+    # - cron: "30 17 * * *"
 
   workflow_dispatch:
     inputs:
